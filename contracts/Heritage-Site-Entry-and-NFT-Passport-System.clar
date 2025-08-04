@@ -9,6 +9,7 @@
 
 (define-data-var passport-id-nonce uint u0)
 (define-data-var site-id-nonce uint u0)
+(define-data-var pricing-window uint u100)
 
 (define-map heritage-sites uint {
     name: (string-ascii 50),
@@ -29,6 +30,8 @@
     tier: (string-ascii 10)
 })
 
+(define-map site-visit-counts {site-id: uint, window-start: uint} uint)
+
 (define-read-only (get-passport-details (passport-id uint))
     (map-get? passport-details passport-id)
 )
@@ -39,6 +42,46 @@
 
 (define-read-only (get-visit-details (passport-id uint) (site-id uint))
     (map-get? site-visits {passport-id: passport-id, site-id: site-id})
+)
+
+(define-read-only (get-current-price (site-id uint))
+    (let (
+        (site (unwrap! (map-get? heritage-sites site-id) (err u0)))
+        (base-fee (get entry-fee site))
+        (popularity-score (get-popularity-score site-id))
+    )
+        (ok (* base-fee (get-price-multiplier popularity-score)))
+    )
+)
+
+(define-read-only (get-popularity-score (site-id uint))
+    (let (
+        (current-window (get-current-window))
+        (current-visits (default-to u0 (map-get? site-visit-counts {site-id: site-id, window-start: current-window})))
+        (previous-window (- current-window (var-get pricing-window)))
+        (previous-visits (default-to u0 (map-get? site-visit-counts {site-id: site-id, window-start: previous-window})))
+    )
+        (+ current-visits previous-visits)
+    )
+)
+
+(define-private (get-current-window)
+    (let ((window-size (var-get pricing-window)))
+        (- burn-block-height (mod burn-block-height window-size))
+    )
+)
+
+(define-private (get-price-multiplier (popularity uint))
+    (if (>= popularity u20)
+        u200
+        (if (>= popularity u10)
+            u150
+            (if (>= popularity u5)
+                u125
+                u100
+            )
+        )
+    )
 )
 
 (define-public (register-heritage-site (name (string-ascii 50)) (location (string-ascii 100)) (entry-fee uint))
@@ -83,6 +126,8 @@
             stamped: true
         })
         
+        (update-visit-count site-id)
+        
         (map-set passport-details passport-id 
             (merge current-details {
                 visit-count: (+ (get visit-count current-details) u1),
@@ -100,6 +145,15 @@
             "SILVER"
             "BRONZE"
         )
+    )
+)
+
+(define-private (update-visit-count (site-id uint))
+    (let (
+        (current-window (get-current-window))
+        (current-count (default-to u0 (map-get? site-visit-counts {site-id: site-id, window-start: current-window})))
+    )
+        (map-set site-visit-counts {site-id: site-id, window-start: current-window} (+ current-count u1))
     )
 )
 
