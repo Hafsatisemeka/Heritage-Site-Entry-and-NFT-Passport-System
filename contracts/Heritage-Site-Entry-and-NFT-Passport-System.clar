@@ -32,6 +32,9 @@
 
 (define-map site-visit-counts {site-id: uint, window-start: uint} uint)
 
+(define-map passport-nickname uint (string-ascii 20))
+
+
 (define-read-only (get-passport-details (passport-id uint))
     (map-get? passport-details passport-id)
 )
@@ -44,13 +47,9 @@
     (map-get? site-visits {passport-id: passport-id, site-id: site-id})
 )
 
-(define-read-only (get-current-price (site-id uint))
-    (let (
-        (site (unwrap! (map-get? heritage-sites site-id) (err u0)))
-        (base-fee (get entry-fee site))
-        (popularity-score (get-popularity-score site-id))
-    )
-        (ok (* base-fee (get-price-multiplier popularity-score)))
+(define-private (get-current-window)
+    (let ((window-size (var-get pricing-window)))
+        (- burn-block-height (mod burn-block-height window-size))
     )
 )
 
@@ -62,12 +61,6 @@
         (previous-visits (default-to u0 (map-get? site-visit-counts {site-id: site-id, window-start: previous-window})))
     )
         (+ current-visits previous-visits)
-    )
-)
-
-(define-private (get-current-window)
-    (let ((window-size (var-get pricing-window)))
-        (- burn-block-height (mod burn-block-height window-size))
     )
 )
 
@@ -83,6 +76,23 @@
         )
     )
 )
+
+(define-read-only (get-current-price (site-id uint))
+    (let (
+        (site (unwrap! (map-get? heritage-sites site-id) (err u0)))
+        (base-fee (get entry-fee site))
+        (popularity-score (get-popularity-score site-id))
+    )
+        (ok (* base-fee (get-price-multiplier popularity-score)))
+    )
+)
+
+(define-read-only (get-nickname (passport-id uint))
+    (map-get? passport-nickname passport-id)
+)
+
+
+
 
 (define-public (register-heritage-site (name (string-ascii 50)) (location (string-ascii 100)) (entry-fee uint))
     (let ((new-site-id (+ (var-get site-id-nonce) u1)))
@@ -111,6 +121,17 @@
         (ok new-passport-id)
     )
 )
+
+(define-private (update-visit-count (site-id uint))
+    (let (
+        (current-window (get-current-window))
+        (current-count (default-to u0 (map-get? site-visit-counts {site-id: site-id, window-start: current-window})))
+    )
+        (map-set site-visit-counts {site-id: site-id, window-start: current-window} (+ current-count u1))
+    )
+)
+
+
 
 (define-public (record-visit (passport-id uint) (site-id uint))
     (let (
@@ -148,14 +169,6 @@
     )
 )
 
-(define-private (update-visit-count (site-id uint))
-    (let (
-        (current-window (get-current-window))
-        (current-count (default-to u0 (map-get? site-visit-counts {site-id: site-id, window-start: current-window})))
-    )
-        (map-set site-visit-counts {site-id: site-id, window-start: current-window} (+ current-count u1))
-    )
-)
 
 (define-public (deactivate-site (site-id uint))
     (let ((site (unwrap! (map-get? heritage-sites site-id) err-not-found)))
@@ -169,6 +182,14 @@
     (let ((owner (unwrap! (nft-get-owner? heritage-passport passport-id) err-not-found)))
         (asserts! (is-eq tx-sender owner) err-unauthorized)
         (try! (nft-transfer? heritage-passport passport-id tx-sender recipient))
+        (ok true)
+    )
+)
+
+(define-public (set-nickname (passport-id uint) (nickname (string-ascii 20)))
+    (let ((owner (unwrap! (nft-get-owner? heritage-passport passport-id) err-not-found)))
+        (asserts! (is-eq tx-sender owner) err-unauthorized)
+        (map-set passport-nickname passport-id nickname)
         (ok true)
     )
 )
