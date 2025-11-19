@@ -39,6 +39,8 @@
 (define-map site-rating-sums uint uint)
 (define-map site-rating-counts uint uint)
 
+(define-map site-donations uint uint)
+
 
 (define-read-only (get-passport-details (passport-id uint))
     (map-get? passport-details passport-id)
@@ -104,6 +106,10 @@
             (ok u0)
         )
     )
+)
+
+(define-read-only (get-site-donations (site-id uint))
+    (default-to u0 (map-get? site-donations site-id))
 )
 
 
@@ -235,5 +241,25 @@
                 )
             )
         )
+    )
+)
+
+(define-public (donate-to-site (site-id uint) (amount uint))
+    (let ((site (unwrap! (map-get? heritage-sites site-id) err-invalid-site))
+          (current-donations (default-to u0 (map-get? site-donations site-id))))
+        (asserts! (get active site) err-invalid-site)
+        (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
+        (map-set site-donations site-id (+ current-donations amount))
+        (ok true)
+    )
+)
+
+(define-public (withdraw-site-donations (site-id uint))
+    (let ((donations (default-to u0 (map-get? site-donations site-id))))
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (asserts! (> donations u0) err-not-found)
+        (try! (as-contract (stx-transfer? donations tx-sender contract-owner)))
+        (map-set site-donations site-id u0)
+        (ok true)
     )
 )
